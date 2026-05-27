@@ -9,7 +9,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from croniter import croniter
+from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template_string, request
+
+load_dotenv()
 
 app = Flask(__name__)
 
@@ -593,5 +596,7 @@ def clear_log():
 
 
 if __name__ == "__main__":
-    print("Dashboard: http://localhost:5555")
-    app.run(host="127.0.0.1", port=5555, debug=False)
+    host = os.getenv("HOST", "127.0.0.1")
+    port = int(os.getenv("PORT", 5555))
+    print(f"Dashboard: http://{host}:{port}")
+    app.run(host=host, port=port, debug=False)
