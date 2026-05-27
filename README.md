@@ -1,20 +1,19 @@
 # Cron Dashboard
 
-A minimal localhost web dashboard to monitor your crontab jobs — logs, status, next run, and quick actions.
+A minimal localhost web dashboard for monitoring your crontab jobs. Reads `crontab -l` automatically and shows each job's schedule, last run status, next execution time, and log output — all in one dark-themed UI.
 
-![dark theme dashboard](https://img.shields.io/badge/theme-dark-0d1117?style=flat)
 ![python](https://img.shields.io/badge/python-3.8+-3776ab?style=flat&logo=python&logoColor=white)
 ![flask](https://img.shields.io/badge/flask-3.0-000?style=flat&logo=flask)
 
 ## Features
 
-- **Human-readable schedule** — "Every Tuesday at 11:30" instead of `30 11 * * 2`
+- **Human-readable schedule** — "Every Friday at 09:30" instead of `30 9 * * 5`
 - **Live status** — OK / Failed / Waiting, inferred from log content
 - **Relative times** — "next run in 4d 14h", "last run 5min ago"
 - **Colored logs** — green for success lines, red for errors, yellow for warnings
-- **Run now** button — executes the job immediately without waiting for the schedule
-- **Clear log** button — wipes the log file
-- **Stats bar** — total jobs, OK count, failed count
+- **Run now** — executes any job immediately without waiting for its schedule
+- **Clear log** — wipes the log file with one click
+- **Stats bar** — total jobs, OK count, failed count at a glance
 - **Auto-refresh** every 60 seconds
 
 ## Setup
@@ -27,30 +26,27 @@ python3 app.py
 
 ## How it works
 
-The dashboard reads your crontab with `crontab -l` automatically. Any job that redirects output to a log file (`>> /path/to/file.log 2>&1`) will have its log displayed.
+The dashboard reads your crontab via `crontab -l` on every page load. Jobs that redirect output to a log file get their logs displayed inline:
 
 ```cron
-30 11 * * 2  python3 ~/automacoes/myjob.py >> ~/automacoes/myjob.log 2>&1
+30 9 * * 5  python3 ~/automacoes/schedule_recurring.py >> ~/automacoes/barber.log 2>&1
 ```
 
 ## Adding friendly names
 
-Edit `JOB_NAMES` at the top of `app.py`:
+By default, the job name is derived from the script filename. To override it, edit `JOB_NAMES` at the top of `app.py`:
 
 ```python
 JOB_NAMES = {
-    "myjob.py": "My automation — friendly name",
+    "schedule_recurring.py": "Book beard — Heron Barbearia",
 }
 ```
 
 ## Not meant to run 24/7
 
-Start it when you need it, kill it when done:
+Start it when you need it, stop it when done:
 
 ```bash
-# start
 python3 app.py &
-
-# stop
 kill $(lsof -ti:5555)
 ```
