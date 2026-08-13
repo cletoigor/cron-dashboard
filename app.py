@@ -1,30 +1,35 @@
 """
 Cron Dashboard — localhost:5555
+Reads launchd LaunchAgents instead of crontab.
 """
 
+import calendar
+import json
 import os
+import plistlib
 import re
 import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from croniter import croniter
-from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template_string, request
-
-load_dotenv()
 
 app = Flask(__name__)
 
-# Nomes amigáveis opcionais para comandos específicos
+LAUNCHD_AGENTS_DIR = os.path.expanduser("~/Library/LaunchAgents")
+LAUNCHD_PREFIX = "com.igorcleto."
+
 JOB_NAMES = {
-    "schedule_recurring.py": "Agendar barba — Heron Barbearia",
+    "com.igorcleto.barbeiro": "Agendar barba — Heron Barbearia",
+    "com.igorcleto.reembolso-academia": "Reembolso academia — Revelo",
+    "com.igorcleto.garmin-dashboard": "Garmin Dashboard — Saude e Treino",
+    "com.igorcleto.nutri-dash": "Nutri-Dash — Dieta flexível",
 }
 
-DAYS_PT = {
+# launchd weekday: 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
+LAUNCHD_DAYS = {
     0: "domingo", 1: "segunda-feira", 2: "terça-feira",
-    3: "quarta-feira", 4: "quinta-feira", 5: "sexta-feira",
-    6: "sábado", 7: "domingo",
+    3: "quarta-feira", 4: "quinta-feira", 5: "sexta-feira", 6: "sábado",
 }
 MONTHS_PT = {
     1: "janeiro", 2: "fevereiro", 3: "março", 4: "abril",
@@ -33,50 +38,87 @@ MONTHS_PT = {
 }
 
 
-def cron_to_human(expr: str) -> str:
-    try:
-        parts = expr.split()
-        if len(parts) != 5:
-            return expr
-        mn, hr, dom, month, dow = parts
+def sci_to_human(sci: dict) -> str:
+    """Convert StartCalendarInterval dict to human-readable Portuguese string."""
+    if not sci:
+        return "Sem agendamento"
+    hour = sci.get("Hour", 0)
+    minute = sci.get("Minute", 0)
+    time_str = f"às {hour:02d}:{minute:02d}"
+    weekday = sci.get("Weekday")
+    dom = sci.get("Day")
+    month = sci.get("Month")
+    if weekday is not None:
+        day_name = LAUNCHD_DAYS.get(weekday, str(weekday))
+        return f"Toda {day_name} {time_str}"
+    if dom is not None:
+        return f"Todo dia {dom} do mês {time_str}"
+    if month is not None:
+        return f"Em {MONTHS_PT.get(month, month)} {time_str}"
+    return f"Todo dia {time_str}"
 
-        # Time part
-        if mn == "*" and hr == "*":
-            time_part = "todo minuto"
-        elif mn.startswith("*/"):
-            time_part = f"a cada {mn[2:]} minutos"
-        elif hr.startswith("*/"):
-            time_part = f"a cada {hr[2:]} horas"
-        else:
-            try:
-                time_part = f"às {int(hr):02d}:{int(mn):02d}"
-            except ValueError:
-                time_part = f"às {hr}:{mn}"
 
-        # Frequency part
-        if dow != "*":
-            days = []
-            for d in dow.split(","):
-                d = d.strip()
-                if "-" in d:
-                    start, end = d.split("-")
-                    days += [DAYS_PT.get(i, str(i)) for i in range(int(start), int(end) + 1)]
-                else:
-                    days.append(DAYS_PT.get(int(d), d))
-            freq = "toda " + " e ".join(days)
-        elif dom != "*":
-            freq = f"todo dia {dom} do mês"
-        elif month != "*":
-            m_name = MONTHS_PT.get(int(month), month)
-            freq = f"em {m_name}"
-        else:
-            freq = "todo dia"
+def sci_label(sci: dict) -> str:
+    """Short schedule label for the cron pill."""
+    if not sci:
+        return "—"
+    parts = []
+    if "Weekday" in sci:
+        parts.append(f"wday={sci['Weekday']}")
+    if "Day" in sci:
+        parts.append(f"dom={sci['Day']}")
+    if "Hour" in sci:
+        parts.append(f"h={sci['Hour']}")
+    if "Minute" in sci:
+        parts.append(f"m={sci['Minute']}")
+    return " ".join(parts)
 
-        if time_part == "todo minuto":
-            return "A cada minuto"
-        return f"{freq.capitalize()} {time_part}"
-    except Exception:
-        return expr
+
+def next_sci_occurrence(sci: dict):
+    """Return (abs_str, rel_str) for next run of a StartCalendarInterval job."""
+    if not sci:
+        return "—", "—"
+    now = datetime.now()
+    hour = sci.get("Hour", 0)
+    minute = sci.get("Minute", 0)
+    weekday = sci.get("Weekday")  # launchd: 0=Sun
+    dom = sci.get("Day")
+
+    if weekday is not None:
+        # Convert launchd weekday (0=Sun) to Python weekday (0=Mon)
+        py_wd = (weekday - 1) % 7
+        days_ahead = (py_wd - now.weekday()) % 7
+        if days_ahead == 0:
+            candidate = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if now >= candidate:
+                days_ahead = 7
+        next_dt = (now + timedelta(days=days_ahead)).replace(
+            hour=hour, minute=minute, second=0, microsecond=0
+        )
+    elif dom is not None:
+        # Procura o próximo mês (a partir do atual) que tenha o dia `dom`
+        # e cuja ocorrência ainda esteja no futuro. Evita ValueError quando
+        # dom > nº de dias do mês (ex.: Day=31 em fevereiro).
+        year, month = now.year, now.month
+        next_dt = None
+        for _ in range(13):
+            if dom <= calendar.monthrange(year, month)[1]:
+                candidate = datetime(year, month, dom, hour, minute)
+                if candidate > now:
+                    next_dt = candidate
+                    break
+            month = month % 12 + 1
+            if month == 1:
+                year += 1
+        if next_dt is None:
+            return "—", "—"
+    else:
+        candidate = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if now >= candidate:
+            candidate += timedelta(days=1)
+        next_dt = candidate
+
+    return next_dt.strftime("%d/%m %H:%M"), time_until(next_dt)
 
 
 def time_ago(dt: datetime) -> str:
@@ -111,7 +153,7 @@ def time_until(dt: datetime) -> str:
 
 def parse_log(log_file: str):
     if not log_file or not os.path.exists(log_file):
-        return [], "none", "Nunca"
+        return [], "none", "Nunca", 0
 
     mtime = datetime.fromtimestamp(os.path.getmtime(log_file))
     size = os.path.getsize(log_file)
@@ -120,17 +162,16 @@ def parse_log(log_file: str):
         with open(log_file, errors="replace") as f:
             raw = f.read()
     except Exception:
-        return [], "none", time_ago(mtime)
+        return [], "none", time_ago(mtime), 0
 
     lines = raw.splitlines()
     last_run = time_ago(mtime)
 
-    # Colorize lines
     colored = []
     overall = "ok"
     for text in lines[-80:]:
         low = text.lower()
-        if any(w in low for w in ["traceback", "exception", "error:", "erro:", "failed"]):
+        if any(w in low for w in ["traceback", "exception", "error:", "erro:", "failed", "exit: 1"]):
             cls = "err"
             overall = "fail"
         elif "⚠" in text or "sem horário" in low or "warn" in low or "falha" in low:
@@ -144,51 +185,91 @@ def parse_log(log_file: str):
     return colored, overall, last_run, size
 
 
-def parse_crontab():
+def get_launchd_exit_code(label: str):
+    """Return last exit code from launchctl list, or None."""
     try:
-        result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
-        lines = result.stdout.splitlines() if result.returncode == 0 else []
-    except Exception:
-        lines = []
-
-    jobs = []
-    for raw_line in lines:
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        parts = line.split(None, 5)
-        if len(parts) < 6:
-            continue
-
-        cron_expr = " ".join(parts[:5])
-        full_command = parts[5]
-
-        log_match = re.search(r'>>\s*(\S+)', full_command)
-        log_file = log_match.group(1) if log_match else None
-
-        command = re.sub(r'\s*>>\s*\S+\s*2>&1', '', full_command).strip()
-        command = re.sub(r'\s*2>&1', '', command).strip()
-
-        name = next(
-            (n for key, n in JOB_NAMES.items() if key in command),
-            Path(command.split()[-1]).name if command.split() else command[:50],
+        result = subprocess.run(
+            ["launchctl", "list", label],
+            capture_output=True, text=True, timeout=5,
         )
+        if result.returncode == 0:
+            m = re.search(r'"LastExitStatus"\s*=\s*(\d+)', result.stdout)
+            if m:
+                raw = int(m.group(1))
+                return raw >> 8
+    except Exception:
+        pass
+    return None
 
+
+def load_plist(path: str) -> dict:
+    try:
+        with open(path, "rb") as f:
+            return plistlib.load(f)
+    except Exception:
         try:
-            cron_obj = croniter(cron_expr, datetime.now())
-            next_dt = cron_obj.get_next(datetime)
-            next_abs = next_dt.strftime("%d/%m %H:%M")
-            next_rel = time_until(next_dt)
+            result = subprocess.run(
+                ["plutil", "-convert", "json", "-o", "-", path],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0:
+                return json.loads(result.stdout)
         except Exception:
-            next_abs = next_rel = "—"
+            pass
+    return {}
 
-        log_lines, status, last_run, *rest = parse_log(log_file)
-        log_size = rest[0] if rest else 0
+
+def parse_launchd():
+    jobs = []
+    try:
+        filenames = sorted(os.listdir(LAUNCHD_AGENTS_DIR))
+    except Exception:
+        return jobs
+
+    for filename in filenames:
+        if not (filename.startswith(LAUNCHD_PREFIX) and filename.endswith(".plist")):
+            continue
+
+        plist_path = os.path.join(LAUNCHD_AGENTS_DIR, filename)
+        plist = load_plist(plist_path)
+        if not plist:
+            continue
+
+        label = plist.get("Label", filename.replace(".plist", ""))
+        sci = plist.get("StartCalendarInterval") or {}
+
+        log_file = plist.get("StandardOutPath") or plist.get("StandardErrorPath")
+
+        prog_args = plist.get("ProgramArguments", [])
+        if len(prog_args) >= 3 and prog_args[1] == "-c":
+            raw_cmd = prog_args[2]
+            command = (raw_cmd[:120] + "…") if len(raw_cmd) > 120 else raw_cmd
+            # Fallback: extract LOG=/path from bash -c command
+            if not log_file:
+                m = re.search(r'LOG=([^\s;]+)', raw_cmd)
+                if m:
+                    log_file = m.group(1).strip('"\'')
+        else:
+            raw_cmd = ""
+            command = " ".join(prog_args)
+
+        short = label[len(LAUNCHD_PREFIX):] if label.startswith(LAUNCHD_PREFIX) else label
+        name = JOB_NAMES.get(label, short.replace("-", " ").title())
+        human = sci_to_human(sci)
+        pill = sci_label(sci)
+        next_abs, next_rel = next_sci_occurrence(sci)
+
+        log_lines, status, last_run, log_size = parse_log(log_file)
+
+        exit_code = get_launchd_exit_code(label)
+        if exit_code is not None and exit_code != 0:
+            status = "fail"
 
         jobs.append({
             "name": name,
-            "cron": cron_expr,
-            "human": cron_to_human(cron_expr),
+            "label": label,
+            "cron": pill,
+            "human": human,
             "command": command,
             "log_file": log_file,
             "next_abs": next_abs,
@@ -208,7 +289,7 @@ HTML = r"""
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Cron Dashboard</title>
+<title>Launch Dashboard</title>
 <style>
 :root {
   --bg:       #0d1117;
@@ -227,7 +308,6 @@ HTML = r"""
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
        background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; }
 
-/* ── Header ── */
 header {
   background: var(--surface);
   border-bottom: 1px solid var(--border);
@@ -248,8 +328,13 @@ header {
   border-radius: 6px; cursor: pointer;
 }
 .refresh-btn:hover { background: var(--border); }
+.shutdown-btn {
+  background: var(--surface2); border: 1px solid var(--border);
+  color: var(--red); font-size: 12px; padding: 5px 12px;
+  border-radius: 6px; cursor: pointer; transition: all 0.15s;
+}
+.shutdown-btn:hover { background: rgba(248,113,113,0.1); border-color: var(--red); }
 
-/* ── Stats bar ── */
 .stats-bar {
   display: flex; gap: 1px;
   background: var(--border);
@@ -266,10 +351,8 @@ header {
 .stat-val.red   { color: var(--red); }
 .stat-val.blue  { color: var(--blue); }
 
-/* ── Main layout ── */
 main { padding: 24px 28px; display: grid; gap: 16px; max-width: 1100px; }
 
-/* ── Card ── */
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -302,7 +385,6 @@ main { padding: 24px 28px; display: grid; gap: 16px; max-width: 1100px; }
 .badge-fail { background: #2d0c0c; color: var(--red);   border: 1px solid #5c1a1a; }
 .badge-none { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
 
-/* ── Meta row ── */
 .meta-row {
   padding: 12px 18px;
   border-bottom: 1px solid var(--border);
@@ -316,7 +398,6 @@ main { padding: 24px 28px; display: grid; gap: 16px; max-width: 1100px; }
 .meta-value.yellow { color: var(--yellow); }
 .meta-value.muted  { color: var(--muted); }
 
-/* ── Command ── */
 .cmd-row {
   padding: 10px 18px;
   border-bottom: 1px solid var(--border);
@@ -329,7 +410,6 @@ main { padding: 24px 28px; display: grid; gap: 16px; max-width: 1100px; }
   word-break: break-all; flex: 1;
 }
 
-/* ── Actions ── */
 .actions-row {
   padding: 10px 18px;
   border-bottom: 1px solid var(--border);
@@ -350,7 +430,6 @@ main { padding: 24px 28px; display: grid; gap: 16px; max-width: 1100px; }
 .clear-btn:hover { color: var(--text); border-color: var(--muted); }
 .run-status { font-size: 12px; color: var(--muted); margin-left: 4px; }
 
-/* ── Log ── */
 .log-header {
   padding: 8px 18px;
   display: flex; align-items: center; justify-content: space-between;
@@ -376,13 +455,11 @@ main { padding: 24px 28px; display: grid; gap: 16px; max-width: 1100px; }
 .l-dim  { color: #4a5568; }
 .no-log { padding: 16px 18px; color: var(--muted); font-size: 13px; font-style: italic; }
 
-/* ── Empty ── */
 .empty-state {
   padding: 60px 32px; text-align: center;
   color: var(--muted); font-size: 15px;
 }
 
-/* ── Spinner ── */
 @keyframes spin { to { transform: rotate(360deg); } }
 .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--border);
            border-top-color: var(--green); border-radius: 50%; animation: spin .7s linear infinite; }
@@ -392,12 +469,13 @@ main { padding: 24px 28px; display: grid; gap: 16px; max-width: 1100px; }
 
 <header>
   <div class="logo">
-    <span class="logo-icon">⏱</span>
-    <span>Cron Dashboard</span>
+    <span class="logo-icon">🚀</span>
+    <span>Launch Dashboard</span>
   </div>
   <div class="header-right">
     <span class="clock" id="clock"></span>
     <button class="refresh-btn" onclick="location.reload()">↺ Atualizar</button>
+    <button class="shutdown-btn" onclick="doShutdown()">&#9632; Encerrar</button>
   </div>
 </header>
 
@@ -468,7 +546,7 @@ main { padding: 24px 28px; display: grid; gap: 16px; max-width: 1100px; }
   </div>
 
   <div class="actions-row">
-    <button class="run-btn" onclick="runJob({{ loop.index0 }}, this)">▶ Executar agora</button>
+    <button class="run-btn" onclick="runJob('{{ job.label }}', this)">▶ Executar agora</button>
     {% if job.log_file %}
     <button class="clear-btn" onclick="clearLog('{{ job.log_file }}', this)">⌫ Limpar log</button>
     {% endif %}
@@ -493,12 +571,11 @@ main { padding: 24px 28px; display: grid; gap: 16px; max-width: 1100px; }
 </div>
 {% endfor %}
 {% else %}
-<div class="card"><div class="empty-state">Nenhum job no crontab ainda.<br><small style="font-size:12px;margin-top:8px;display:block">Adicione entradas com <code>crontab -e</code></small></div></div>
+<div class="card"><div class="empty-state">Nenhum LaunchAgent encontrado em ~/Library/LaunchAgents/com.igorcleto.*<br><small style="font-size:12px;margin-top:8px;display:block">Adicione plists com prefixo <code>com.igorcleto.</code></small></div></div>
 {% endif %}
 </main>
 
 <script>
-// Live clock
 function updateClock() {
   const now = new Date();
   document.getElementById('clock').textContent =
@@ -507,21 +584,20 @@ function updateClock() {
 setInterval(updateClock, 1000);
 updateClock();
 
-// Auto-refresh page every 60s
 setTimeout(() => location.reload(), 60000);
 
-// Run job now
-function runJob(idx, btn) {
+function runJob(label, btn) {
+  const idx = btn.closest('.card').querySelector('.run-status').id.split('-').pop();
   const status = document.getElementById('run-status-' + idx);
   btn.disabled = true;
   status.innerHTML = '<span class="spinner"></span> executando...';
-  fetch('/run/' + idx, { method: 'POST' })
+  fetch('/run/' + encodeURIComponent(label), { method: 'POST' })
     .then(r => r.json())
     .then(data => {
       if (data.ok) {
         status.textContent = '✓ Iniciado';
         status.style.color = 'var(--green)';
-        setTimeout(() => location.reload(), 3000);
+        setTimeout(() => location.reload(), 4000);
       } else {
         status.textContent = '✗ ' + (data.error || 'erro');
         status.style.color = 'var(--red)';
@@ -535,7 +611,6 @@ function runJob(idx, btn) {
     });
 }
 
-// Clear log
 function clearLog(logFile, btn) {
   if (!confirm('Limpar o log ' + logFile + '?')) return;
   fetch('/clear-log', { method: 'POST', headers: {'Content-Type':'application/json'},
@@ -544,8 +619,13 @@ function clearLog(logFile, btn) {
     .then(data => { if (data.ok) location.reload(); });
 }
 
-// Scroll log boxes to bottom
 document.querySelectorAll('.log-box').forEach(el => el.scrollTop = el.scrollHeight);
+
+async function doShutdown() {
+  if (!confirm('Encerrar o Launch Dashboard?')) return;
+  try { await fetch('/shutdown', {method: 'POST'}); } catch(e) {}
+  document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#7d8a9a;font-family:system-ui;font-size:16px;">Dashboard encerrado.</div>';
+}
 </script>
 
 </body>
@@ -554,7 +634,7 @@ document.querySelectorAll('.log-box').forEach(el => el.scrollTop = el.scrollHeig
 
 
 def get_jobs():
-    return parse_crontab()
+    return parse_launchd()
 
 
 @app.route("/")
@@ -563,20 +643,13 @@ def index():
     return render_template_string(HTML, jobs=jobs)
 
 
-@app.route("/run/<int:job_idx>", methods=["POST"])
-def run_job(job_idx):
-    jobs = get_jobs()
-    if job_idx >= len(jobs):
-        return jsonify({"ok": False, "error": "job não encontrado"})
-    job = jobs[job_idx]
-    cmd = job["command"]
+@app.route("/run/<label>", methods=["POST"])
+def run_job(label):
     try:
-        log_file = job.get("log_file")
-        if log_file:
-            full_cmd = f"{cmd} >> {log_file} 2>&1"
-        else:
-            full_cmd = cmd
-        subprocess.Popen(full_cmd, shell=True, start_new_session=True)
+        subprocess.Popen(
+            ["launchctl", "start", label],
+            start_new_session=True,
+        )
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
@@ -595,8 +668,13 @@ def clear_log():
         return jsonify({"ok": False, "error": str(e)})
 
 
+@app.route("/shutdown", methods=["POST"])
+def shutdown():
+    import signal
+    os.kill(os.getpid(), signal.SIGTERM)
+    return jsonify(ok=True)
+
+
 if __name__ == "__main__":
-    host = os.getenv("HOST", "127.0.0.1")
-    port = int(os.getenv("PORT", 5555))
-    print(f"Dashboard: http://{host}:{port}")
-    app.run(host=host, port=port, debug=False)
+    print("Dashboard: http://localhost:5555")
+    app.run(host="127.0.0.1", port=5555, debug=False)
