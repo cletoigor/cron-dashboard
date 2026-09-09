@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg width="2420" height="1240" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2420 1240" role="img" aria-label="Left to right: launch.sh guards port 5555, spawns app.py with Python 3.8, and redirects its stdout to /tmp/cron_dash.log, then opens the browser. The Flask app's parse_launchd function walks ~/Library/LaunchAgents and keeps only files whose name starts with com.example. and ends with .plist — that prefix check is the dashboard's entire discovery contract, covering four agents today: barbeiro, garmin-dashboard, nutri-dash and reembolso-academia. load_plist reads each one via plistlib, falling back to a plutil subprocess on failure. parse_log reads each job's resolved log file — its StandardOutPath, or, only for barbeiro, a LOG= path regexed out of its inline bash -c command — and colors the last 80 lines by keyword into ok, warn, err or dim, deriving a last-run time and a base status. get_launchd_exit_code separately runs launchctl list on the job's label, a read-only query, extracts LastExitStatus by regex and right-shifts it by 8 to get the real POSIX exit code, overriding the status to fail when it is nonzero. These three results assemble into one job dictionary of twelve fields, which Flask renders into an HTML page — never JSON — with a stats bar computed by Jinja selectattr and one card per job; the page reloads itself fully every 60 seconds via setTimeout, with no live polling. From that page, three buttons reach back into the world: Run now issues POST /run/label, which launchctl starts the job with no confirmation of any kind — gate 1; Clear log issues POST /clear-log, which truncates the exact file parse_log just read, guarded only by a client-side confirm dialog — gate 2; and the Encerrar button (the app's literal label, meaning Shut down) sends POST /shutdown, which SIGTERMs the dashboard's own process.">
+<svg width="2420" height="1300" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2420 1300" role="img" aria-label="Left to right: launch.sh guards port 5555, spawns app.py with Python 3.8, and redirects its stdout to /tmp/cron_dash.log, then opens the browser. The Flask app's parse_launchd function walks ~/Library/LaunchAgents and keeps only files whose name starts with com.example. and ends with .plist — that prefix check is the dashboard's entire discovery contract, covering four agents today: barbeiro, garmin-dashboard, nutri-dash and reembolso-academia. load_plist reads each one via plistlib, falling back to a plutil subprocess on failure. parse_log reads each job's resolved log file — its StandardOutPath, or, only for barbeiro, a LOG= path regexed out of its inline bash -c command — and colors the last 80 lines by keyword into ok, warn, err or dim, deriving a last-run time and a base status. get_launchd_exit_code separately runs launchctl list on the job's label, a read-only query, extracts LastExitStatus by regex and right-shifts it by 8 to get the real POSIX exit code, overriding the status to fail when it is nonzero. These three results assemble into one job dictionary of twelve fields, which Flask renders into an HTML page — never JSON — with a stats bar computed by Jinja selectattr and one card per job; the page reloads itself fully every 60 seconds via setTimeout, with no live polling. From that page, three buttons reach back into the world: Run now issues POST /run/label, which launchctl starts the job with no confirmation of any kind — gate 1; Clear log issues POST /clear-log, which truncates the exact file parse_log just read, guarded only by a client-side confirm dialog — gate 2; and the Encerrar button (the app's literal label, meaning Shut down) sends POST /shutdown, which SIGTERMs the dashboard's own process.">
 <style>
 /* Tokens inlined from the page stylesheet so this file stands alone. */
 svg {
@@ -80,7 +80,7 @@ svg {
         <text x="14" y="864" font-family="Archivo, sans-serif" font-size="12.5" font-weight="600" fill="var(--ink)">Browser</text>
         <text x="14" y="880" font-family="JetBrains Mono, monospace" font-size="9.5" fill="var(--muted)">GET /</text>
 
-        <rect x="0" y="970" width="2420" height="270" fill="var(--lane-e)"/>
+        <rect x="0" y="970" width="2420" height="330" fill="var(--lane-e)"/>
         <line x1="0" y1="970" x2="2420" y2="970" stroke="var(--line)" stroke-width="1"/>
         <text x="14" y="1090" font-family="Archivo, sans-serif" font-size="12.5" font-weight="600" fill="var(--ink)">User actions</text>
         <text x="14" y="1106" font-family="JetBrains Mono, monospace" font-size="9.5" fill="var(--muted)">→ launchd control plane</text>
@@ -225,47 +225,53 @@ svg {
         <path d="M 1880 840 H 1935" fill="none" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#ah)"/>
 
         <!-- ============ LANE 5 — USER ACTIONS ============ -->
+        <!-- Encerrar moved to the top slot: it's the only button reached directly
+             from the rendered page, and that requires being first in the column
+             so the incoming arrow doesn't have to cross the boxes below it. -->
         <rect x="1940" y="1000" width="180" height="56" rx="2" fill="var(--client-bg)" stroke="var(--client)" stroke-width="1.4"/>
-        <text x="1952" y="1024" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="700" fill="var(--ink)">▶ Run now</text>
-        <text x="1952" y="1040" font-family="Source Serif 4, serif" font-size="9" fill="var(--muted)">per job card</text>
+        <text x="1952" y="1024" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="700" fill="var(--ink)">■ Encerrar</text>
+        <text x="1952" y="1040" font-family="Source Serif 4, serif" font-size="9" fill="var(--muted)">app's label; means "shut down"</text>
 
-        <rect x="1940" y="1080" width="180" height="56" rx="2" fill="var(--client-bg)" stroke="var(--client)" stroke-width="1.4"/>
-        <text x="1952" y="1104" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="700" fill="var(--ink)">⌫ Clear log</text>
-        <text x="1952" y="1120" font-family="Source Serif 4, serif" font-size="9" fill="var(--muted)">only if log_file exists</text>
+        <rect x="1940" y="1100" width="180" height="56" rx="2" fill="var(--client-bg)" stroke="var(--client)" stroke-width="1.4"/>
+        <text x="1952" y="1124" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="700" fill="var(--ink)">▶ Run now</text>
+        <text x="1952" y="1140" font-family="Source Serif 4, serif" font-size="9" fill="var(--muted)">per job card</text>
 
-        <rect x="1940" y="1160" width="180" height="56" rx="2" fill="var(--client-bg)" stroke="var(--client)" stroke-width="1.4"/>
-        <text x="1952" y="1184" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="700" fill="var(--ink)">■ Encerrar</text>
-        <text x="1952" y="1200" font-family="Source Serif 4, serif" font-size="9" fill="var(--muted)">app's label; means "shut down"</text>
+        <rect x="1940" y="1200" width="180" height="56" rx="2" fill="var(--client-bg)" stroke="var(--client)" stroke-width="1.4"/>
+        <text x="1952" y="1224" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="700" fill="var(--ink)">⌫ Clear log</text>
+        <text x="1952" y="1240" font-family="Source Serif 4, serif" font-size="9" fill="var(--muted)">only if log_file exists</text>
 
+        <!-- rendered page → Encerrar (restored) -->
         <path d="M 2030 935 V 996" fill="none" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#ah)"/>
 
-        <!-- GATE 1 -->
-        <rect x="2150" y="990" width="260" height="90" rx="2" fill="var(--interlock-bg)" stroke="var(--interlock)" stroke-width="1.8"/>
-        <text x="2162" y="1012" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="700" fill="var(--ink)">POST /run/&lt;label&gt;</text>
-        <text x="2162" y="1027" font-family="Source Serif 4, serif" font-size="9" fill="var(--muted)">launchctl start &lt;label&gt;</text>
-        <text x="2162" y="1041" font-family="Source Serif 4, serif" font-size="9" fill="var(--muted)">start_new_session=True, fire-and-forget</text>
-        <text x="2162" y="1058" font-family="Source Serif 4, serif" font-size="8.5" font-style="italic" fill="var(--interlock)">GATE 1 · no confirmation, real launchd job</text>
-        <text x="2162" y="1071" font-family="Source Serif 4, serif" font-size="8.5" fill="var(--muted)">job's own script then appends to the</text>
-        <text x="2162" y="1082" font-family="Source Serif 4, serif" font-size="8.5" fill="var(--muted)">log file at far left — seen next reload</text>
+        <!-- shutdown, not gated red: scope is only this process -->
+        <rect x="2150" y="983" width="260" height="90" rx="2" fill="var(--signal-bg)" stroke="var(--signal)" stroke-width="1.4"/>
+        <text x="2162" y="1005" font-family="JetBrains Mono, monospace" font-size="10" font-weight="700" fill="var(--ink)">POST /shutdown</text>
+        <text x="2162" y="1021" font-family="Source Serif 4, serif" font-size="9" fill="var(--muted)">os.kill(pid, SIGTERM) — itself only</text>
+        <text x="2162" y="1038" font-family="Source Serif 4, serif" font-size="8.5" font-style="italic" fill="var(--muted)">not a gated route — scope is this</text>
+        <text x="2162" y="1050" font-family="Source Serif 4, serif" font-size="8.5" font-style="italic" fill="var(--muted)">process only, nothing external</text>
 
-        <path d="M 2120 1028 H 2145" fill="none" stroke="var(--interlock)" stroke-width="2" marker-end="url(#ahr)"/>
+        <path d="M 2120 1028 H 2145" fill="none" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#ah)"/>
+
+        <!-- GATE 1 -->
+        <rect x="2150" y="1083" width="260" height="90" rx="2" fill="var(--interlock-bg)" stroke="var(--interlock)" stroke-width="1.8"/>
+        <text x="2162" y="1105" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="700" fill="var(--ink)">POST /run/&lt;label&gt;</text>
+        <text x="2162" y="1120" font-family="Source Serif 4, serif" font-size="9" fill="var(--muted)">launchctl start &lt;label&gt;</text>
+        <text x="2162" y="1134" font-family="Source Serif 4, serif" font-size="9" fill="var(--muted)">start_new_session=True, fire-and-forget</text>
+        <text x="2162" y="1151" font-family="Source Serif 4, serif" font-size="8.5" font-style="italic" fill="var(--interlock)">GATE 1 · no confirmation, real launchd job</text>
+        <text x="2162" y="1164" font-family="Source Serif 4, serif" font-size="8.5" fill="var(--muted)">job's own script then appends to the</text>
+        <text x="2162" y="1175" font-family="Source Serif 4, serif" font-size="8.5" fill="var(--muted)">log file at far left — seen next reload</text>
+
+        <path d="M 2120 1128 H 2145" fill="none" stroke="var(--interlock)" stroke-width="2" marker-end="url(#ahr)"/>
 
         <!-- GATE 2 -->
-        <rect x="2150" y="1090" width="260" height="90" rx="2" fill="var(--interlock-bg)" stroke="var(--interlock)" stroke-width="1.8"/>
-        <text x="2162" y="1112" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="700" fill="var(--ink)">POST /clear-log</text>
-        <text x="2162" y="1127" font-family="Source Serif 4, serif" font-size="9" fill="var(--muted)">checks os.path.exists, then</text>
-        <text x="2162" y="1140" font-family="Source Serif 4, serif" font-size="9" fill="var(--muted)">open(log_file, "w") — truncates</text>
-        <text x="2162" y="1157" font-family="Source Serif 4, serif" font-size="8.5" font-style="italic" fill="var(--interlock)">GATE 2 · only gate is a JS confirm()</text>
-        <text x="2162" y="1170" font-family="Source Serif 4, serif" font-size="8.5" fill="var(--muted)">the exact file parse_log() reads —</text>
-        <text x="2162" y="1181" font-family="Source Serif 4, serif" font-size="8.5" fill="var(--muted)">no server-side gate at all</text>
+        <rect x="2150" y="1183" width="260" height="90" rx="2" fill="var(--interlock-bg)" stroke="var(--interlock)" stroke-width="1.8"/>
+        <text x="2162" y="1205" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="700" fill="var(--ink)">POST /clear-log</text>
+        <text x="2162" y="1220" font-family="Source Serif 4, serif" font-size="9" fill="var(--muted)">checks os.path.exists, then</text>
+        <text x="2162" y="1233" font-family="Source Serif 4, serif" font-size="9" fill="var(--muted)">open(log_file, "w") — truncates</text>
+        <text x="2162" y="1250" font-family="Source Serif 4, serif" font-size="8.5" font-style="italic" fill="var(--interlock)">GATE 2 · only gate is a JS confirm()</text>
+        <text x="2162" y="1263" font-family="Source Serif 4, serif" font-size="8.5" fill="var(--muted)">the exact file parse_log() reads —</text>
+        <text x="2162" y="1274" font-family="Source Serif 4, serif" font-size="8.5" fill="var(--muted)">no server-side gate at all</text>
 
-        <path d="M 2120 1108 H 2145" fill="none" stroke="var(--interlock)" stroke-width="2" marker-end="url(#ahr)"/>
-
-        <!-- shutdown, not gated red: scope is only this process -->
-        <rect x="2150" y="1188" width="260" height="46" rx="2" fill="var(--signal-bg)" stroke="var(--signal)" stroke-width="1.4"/>
-        <text x="2162" y="1208" font-family="JetBrains Mono, monospace" font-size="10" font-weight="700" fill="var(--ink)">POST /shutdown</text>
-        <text x="2162" y="1222" font-family="Source Serif 4, serif" font-size="9" fill="var(--muted)">os.kill(pid, SIGTERM) — itself only</text>
-
-        <path d="M 2120 1188 H 2145" fill="none" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#ah)"/>
+        <path d="M 2120 1228 H 2145" fill="none" stroke="var(--interlock)" stroke-width="2" marker-end="url(#ahr)"/>
 
       </svg>
