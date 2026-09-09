@@ -1,9 +1,19 @@
 # Launch Dashboard
 
-A minimal localhost web dashboard for monitoring your macOS **launchd** agents. Reads your `~/Library/LaunchAgents/com.igorcleto.*.plist` files automatically and shows each job's schedule, last run status, next execution time, and log output — all in one dark-themed UI.
+A minimal localhost web dashboard for monitoring your macOS **launchd** agents. Reads your `~/Library/LaunchAgents/com.example.*.plist` files automatically and shows each job's schedule, last run status, next execution time, and log output — all in one dark-themed UI.
 
 ![python](https://img.shields.io/badge/python-3.8+-3776ab?style=flat&logo=python&logoColor=white)
 ![flask](https://img.shields.io/badge/flask-3.0-000?style=flat&logo=flask)
+
+## Architecture
+
+![Architecture](docs/architecture.svg)
+
+The dashboard has no database and no API of its own. It discovers agents purely by
+filename prefix, reads each job's plist and log file, and asks `launchctl` for the exit
+code — right-shifting it by 8 to recover the real POSIX status. Everything assembles
+into a single twelve-field job dict that Flask renders as HTML, never JSON. Two of the
+four routes reach back into the world it observes, and both are marked as gates.
 
 ## Features
 
@@ -27,7 +37,7 @@ pip install flask
 ## How it works
 
 On every page load the dashboard scans `~/Library/LaunchAgents/` for plists prefixed
-`com.igorcleto.`, parses each one, and renders it as a card. The schedule comes from the
+`com.example.`, parses each one, and renders it as a card. The schedule comes from the
 plist's `StartCalendarInterval` (`Weekday` / `Day` / `Hour` / `Minute`); logs come from
 `StandardOutPath` / `StandardErrorPath` (with a `LOG=/path` fallback parsed from a
 `bash -c` command). "Run now" calls `launchctl start <label>`.
@@ -39,7 +49,7 @@ at the top of `app.py`:
 
 ```python
 JOB_NAMES = {
-    "com.igorcleto.barbeiro": "Book beard — Heron Barbearia",
+    "com.example.barbeiro": "Book beard — barbershop",
 }
 ```
 
